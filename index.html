@@ -244,8 +244,8 @@ const PAGE_SIZE=30;
 let filtered=[],sortMode='match',page=1;
 
 const QUICK=[
-  {r:'Elektroniker',s:'Hamburg'},{r:'Elektriker',s:'NRW'},
-  {r:'Servicetechniker',s:'Bayern'},{r:'Bauleiter',s:''},
+  {r:'Elektroniker',s:'Hamburg'},{r:'Elektriker',s:'Köln'},
+  {r:'Servicetechniker',s:'München'},{r:'Bauleiter',s:''},
   {r:'Mechatroniker',s:''},{r:'Monteur',s:''},
   {r:'',s:'Berlin'},{r:'',s:'Köln'},
 ];
@@ -270,29 +270,40 @@ function haversineKm(a,b){
   const x=Math.sin(dLat/2)**2+Math.cos(a[0]*toR)*Math.cos(b[0]*toR)*Math.sin(dLon/2)**2;
   return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
 }
+// Ort auflösen: zuerst exakter Name, dann ganzes Wort (längste Namen zuerst), dann eindeutiger Anfang beim Tippen
+const CITY_KEYS=Object.keys(CITY_COORDS).sort((a,b)=>b.length-a.length);
+const ORT_SEP=/[\s,\/()-]/;
+function normOrt(s){return String(s).toLowerCase().replace(/\s+/g,' ').trim();}
 function resolveCoord(text){
-  const t=text.toLowerCase();
-  for(const[city,coord]of Object.entries(CITY_COORDS))
-    if(coord&&t.includes(city.toLowerCase()))return coord;
+  const t=normOrt(text);
+  if(!t)return null;
+  for(const city of CITY_KEYS)if(city.toLowerCase()===t)return CITY_COORDS[city];
+  for(const city of CITY_KEYS){
+    const c=city.toLowerCase(),i=t.indexOf(c);
+    if(i<0)continue;
+    const before=i===0||ORT_SEP.test(t[i-1]),after=i+c.length===t.length||ORT_SEP.test(t[i+c.length]);
+    if(before&&after)return CITY_COORDS[city];
+  }
+  if(t.length>=3){
+    const hits=CITY_KEYS.filter(city=>city.toLowerCase().startsWith(t));
+    const coords=new Set(hits.map(city=>String(CITY_COORDS[city])));
+    if(coords.size===1)return CITY_COORDS[hits[0]];
+  }
   return null;
 }
+// Matching: 100 % Vakanz + exakter Ort · 80 % ≤ 30 km · 60 % ≤ 80 km · 50 % nur Vakanz
 function computeScore(d,rQ,oQ){
-  const rm=rQ?d.r.toLowerCase().includes(rQ):false;
-  const om=oQ?d.s.toLowerCase().includes(oQ):false;
-  if(!rQ&&!oQ)return{score:null,label:null,km:null};
-  if(rm&&om)return{score:100,label:'100 %',km:0};
-  if(rm&&oQ&&!om){
-    const qc=resolveCoord(oQ),rc=d.c;
-    if(qc&&rc){
-      const km=haversineKm(qc,rc);
-      if(km<=30)return{score:80,label:'80 %',km:Math.round(km)};
-      if(km<=80)return{score:60,label:'60 %',km:Math.round(km)};
-      return{score:0,label:null,km:Math.round(km)};
-    }
-  }
-  if(rm&&!oQ)return{score:50,label:'50 %',km:null};
-  if(om&&!rQ)return{score:null,label:null,km:null};
-  return{score:0,label:null,km:null};
+  if(!rQ)return{score:null,label:null,km:null};
+  if(!d.r.toLowerCase().includes(rQ))return{score:0,label:null,km:null};
+  if(!oQ)return{score:50,label:'50 %',km:null};
+  if(normOrt(d.s)===normOrt(oQ))return{score:100,label:'100 %',km:0};
+  const qc=resolveCoord(oQ),rc=d.c;
+  if(!qc||!rc)return{score:0,label:null,km:null};
+  const km=haversineKm(qc,rc);
+  if(km<1)return{score:100,label:'100 %',km:0};
+  if(km<=30)return{score:80,label:'80 %',km:Math.round(km)};
+  if(km<=80)return{score:60,label:'60 %',km:Math.round(km)};
+  return{score:0,label:null,km:Math.round(km)};
 }
 
 function initApp(){
